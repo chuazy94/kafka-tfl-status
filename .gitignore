@@ -1,0 +1,30 @@
+# Environment & secrets
+.env
+.env.local
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+.next/
+
+# OS
+.DS_Store
+
+# IDE
+.cursor/
+*.swp
+*.swo
+
+# PySpark artifacts
+pyspark_streaming/artifacts/
+pyspark_streaming/checkpoints/
+pyspark_streaming/tfl_predictions.db
+
+# Scripts venv
+scripts/.venv/
