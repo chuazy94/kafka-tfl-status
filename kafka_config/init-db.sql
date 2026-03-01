@@ -70,7 +70,7 @@ INSERT INTO lines (code, name, color) VALUES
     ('B', 'Bakerloo', '#B36305'),
     ('C', 'Central', '#E32017'),
     ('D', 'District', '#00782A'),
-    ('H', 'Hammersmith & City', '#F3A9BB'),
+    ('H', 'Hammersmith & Circle', '#F3A9BB'),
     ('J', 'Jubilee', '#A0A5A9'),
     ('M', 'Metropolitan', '#9B0056'),
     ('N', 'Northern', '#000000'),

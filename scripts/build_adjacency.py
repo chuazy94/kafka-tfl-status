@@ -31,6 +31,7 @@ TFL_LINE_ROUTE_URL = "https://api.tfl.gov.uk/Line/{line_id}/Route/Sequence/all"
 LINES = {
     "bakerloo": "B",
     "central": "C",
+    "circle": "H",
     "district": "D",
     "hammersmith-city": "H",
     "jubilee": "J",
@@ -177,6 +178,7 @@ def import_adjacencies(adjacencies):
 
 def main():
     all_adjacencies = []
+    seen_global = set()
     
     for line_id, line_code in LINES.items():
         print(f"Processing {line_id} line...")
@@ -186,8 +188,16 @@ def main():
             sequences = extract_station_sequence(route_data)
             adjacencies = build_adjacency_pairs(line_code, sequences)
             
-            print(f"  Found {len(adjacencies)} adjacencies for {line_id}")
-            all_adjacencies.extend(adjacencies)
+            # Deduplicate across lines sharing the same code (e.g. circle + hammersmith-city)
+            new_adjacencies = []
+            for adj in adjacencies:
+                key = (adj["line_code"], adj["from_code"], adj["to_code"])
+                if key not in seen_global:
+                    seen_global.add(key)
+                    new_adjacencies.append(adj)
+            
+            print(f"  Found {len(new_adjacencies)} new adjacencies for {line_id}")
+            all_adjacencies.extend(new_adjacencies)
             
         except Exception as e:
             print(f"  Error processing {line_id}: {e}")

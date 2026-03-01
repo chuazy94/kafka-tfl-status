@@ -3,13 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { useTrainAnimation } from "@/hooks/useTrainAnimation";
 
 const LINE_COLORS: Record<string, string> = {
   B: "#B36305", // Bakerloo
   C: "#E32017", // Central
   D: "#00782A", // District
-  H: "#F3A9BB", // Hammersmith & City
+  H: "#F3A9BB", // Hammersmith & Circle
   J: "#A0A5A9", // Jubilee
   M: "#9B0056", // Metropolitan
   N: "#000000", // Northern
@@ -18,17 +17,21 @@ const LINE_COLORS: Record<string, string> = {
   W: "#95CDBA", // Waterloo & City
 };
 
+interface TrainGeoJSON {
+  type: "FeatureCollection";
+  features: GeoJSON.Feature[];
+}
+
 interface MapProps {
   accessToken: string;
   selectedLine?: string;
+  trains: TrainGeoJSON;
 }
 
-export default function Map({ accessToken, selectedLine }: MapProps) {
+export default function Map({ accessToken, selectedLine, trains }: MapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-
-  const { trains, isLoading, trainCount } = useTrainAnimation(selectedLine);
 
   // Initialize map
   useEffect(() => {
@@ -116,6 +119,7 @@ export default function Map({ accessToken, selectedLine }: MapProps) {
                 "line-color": ["get", "color"],
                 "line-width": 3,
                 "line-opacity": 0.8,
+                "line-offset": ["coalesce", ["get", "line_offset"], 0],
               },
             },
             "stations-layer"
@@ -152,8 +156,16 @@ export default function Map({ accessToken, selectedLine }: MapProps) {
             "W", LINE_COLORS.W,
             "#888888",
           ],
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": [
+            "match", ["get", "line_code"],
+            "H", 3,
+            2,
+          ],
+          "circle-stroke-color": [
+            "match", ["get", "line_code"],
+            "H", "#FFD300",
+            "#ffffff",
+          ],
         },
       });
 

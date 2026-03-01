@@ -3,6 +3,7 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import LineSelector from "@/components/LineSelector";
+import { useTrainAnimation } from "@/hooks/useTrainAnimation";
 
 const Map = dynamic(() => import("@/components/Map"), {
   ssr: false,
@@ -16,6 +17,7 @@ const Map = dynamic(() => import("@/components/Map"), {
 export default function Home() {
   const [selectedLine, setSelectedLine] = useState<string | undefined>();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const { trains, trainCount, latestTimestamp } = useTrainAnimation(selectedLine);
 
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
@@ -34,7 +36,7 @@ export default function Home() {
     <>
       {/* Full-screen Map */}
       <div id="map-wrapper" style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh" }}>
-        <Map accessToken={mapboxToken} selectedLine={selectedLine} />
+        <Map accessToken={mapboxToken} selectedLine={selectedLine} trains={trains} />
       </div>
 
       {/* Floating Sidebar */}
@@ -77,6 +79,18 @@ export default function Home() {
                 selectedLine={selectedLine}
                 onSelectLine={setSelectedLine}
               />
+            </div>
+
+            {/* Data Status */}
+            <div style={{ marginTop: "1.5rem", padding: "0.75rem", background: "rgba(255, 255, 255, 0.05)", borderRadius: "0.5rem" }}>
+              <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginBottom: "0.25rem" }}>
+                Tracking <span style={{ color: "white", fontWeight: "600" }}>{trainCount}</span> trains
+              </div>
+              {latestTimestamp && (
+                <div style={{ fontSize: "0.7rem", color: "#6b7280" }}>
+                  Last update: {new Date(latestTimestamp).toLocaleTimeString()}
+                </div>
+              )}
             </div>
           </div>
         </div>

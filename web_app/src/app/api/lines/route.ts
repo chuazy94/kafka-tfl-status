@@ -24,22 +24,29 @@ export async function GET() {
     }
 
     // Convert to GeoJSON with line colors
-    const features = lines.map((line) => {
+    const features: Array<Record<string, unknown>> = [];
+    for (const line of lines) {
       const segments = lineRoutes[line.code] || [];
-      
-      return {
-        type: "Feature",
-        geometry: {
-          type: "MultiLineString",
-          coordinates: segments,
-        },
-        properties: {
-          code: line.code,
-          name: line.name,
-          color: line.color,
-        },
-      };
-    });
+
+      if (line.code === "H") {
+        features.push({
+          type: "Feature",
+          geometry: { type: "MultiLineString", coordinates: segments },
+          properties: { code: "H", name: "Hammersmith & City", color: "#F3A9BB", line_offset: -2 },
+        });
+        features.push({
+          type: "Feature",
+          geometry: { type: "MultiLineString", coordinates: segments },
+          properties: { code: "H", name: "Circle", color: "#FFD300", line_offset: 2 },
+        });
+      } else {
+        features.push({
+          type: "Feature",
+          geometry: { type: "MultiLineString", coordinates: segments },
+          properties: { code: line.code, name: line.name, color: line.color, line_offset: 0 },
+        });
+      }
+    }
 
     const geojson = {
       type: "FeatureCollection",

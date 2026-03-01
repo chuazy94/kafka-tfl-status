@@ -18,7 +18,7 @@ TFL_API_BASE = "https://api.tfl.gov.uk/TrackerNet/PredictionSummary"
 TFL_APP_KEY = os.getenv("TFL_APP_KEY")
 # TfL Line codes
 TUBE_LINES = ["B", "C", "D", "H", "J", "M", "N", "P", "V", "W"]
-# B=Bakerloo, C=Central, D=District, H=Hammersmith, J=Jubilee,
+# B=Bakerloo, C=Central, D=District, H=Hammersmith & Circle, J=Jubilee,
 # M=Metropolitan, N=Northern, P=Piccadilly, V=Victoria, W=Waterloo
 
 def create_producer():

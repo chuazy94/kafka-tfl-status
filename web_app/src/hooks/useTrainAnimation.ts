@@ -74,6 +74,7 @@ export function useTrainAnimation(lineFilter?: string) {
   const [animatedTrains, setAnimatedTrains] = useState<AnimatedTrain[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [latestTimestamp, setLatestTimestamp] = useState<string | null>(null);
 
   const trainsRef = useRef<Map<string, AnimatedTrain>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
@@ -185,6 +186,15 @@ export function useTrainAnimation(lineFilter?: string) {
       }
 
       trainsRef.current = newTrainsMap;
+
+      if (data.features.length > 0) {
+        const maxTs = data.features.reduce((max, f) => {
+          const ts = f.properties.data_timestamp;
+          return ts > max ? ts : max;
+        }, data.features[0].properties.data_timestamp);
+        setLatestTimestamp(maxTs);
+      }
+
       setIsLoading(false);
       setError(null);
     } catch (err) {
@@ -258,6 +268,7 @@ export function useTrainAnimation(lineFilter?: string) {
     isLoading,
     error,
     trainCount: animatedTrains.length,
+    latestTimestamp,
     refetch: fetchTrains,
   };
 }

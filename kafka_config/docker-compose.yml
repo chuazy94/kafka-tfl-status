@@ -50,7 +50,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     healthcheck:
-      test: pg_isready -U tfl
+      test: pg_isready -U tfl -d tfl_trains
       interval: 5s
       timeout: 5s
       retries: 10
@@ -102,7 +102,7 @@ services:
       -c "while true; do
         sleep 3600;
         echo \"[$(date)] Running cleanup...\";
-        psql -c \"SELECT cleanup_old_train_positions('1 day');\";
+        psql -c \"SELECT cleanup_old_train_positions(INTERVAL '1 day');\";
       done"
     depends_on:
       postgres:

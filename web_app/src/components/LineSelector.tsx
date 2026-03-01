@@ -4,13 +4,14 @@ interface Line {
   code: string;
   name: string;
   color: string;
+  secondaryColor?: string;
 }
 
 const TUBE_LINES: Line[] = [
   { code: "B", name: "Bakerloo", color: "#B36305" },
   { code: "C", name: "Central", color: "#E32017" },
   { code: "D", name: "District", color: "#00782A" },
-  { code: "H", name: "Hammersmith & City", color: "#F3A9BB" },
+  { code: "H", name: "Hammersmith & Circle", color: "#F3A9BB", secondaryColor: "#FFD300" },
   { code: "J", name: "Jubilee", color: "#A0A5A9" },
   { code: "M", name: "Metropolitan", color: "#9B0056" },
   { code: "N", name: "Northern", color: "#000000" },
@@ -51,10 +52,18 @@ export default function LineSelector({
               : "bg-white/10 text-white hover:bg-white/20"
             }`}
         >
-          <span
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: line.color }}
-          />
+          <span className="flex items-center gap-0.5">
+            <span
+              className="w-3 h-3 rounded-full"
+              style={{ backgroundColor: line.color }}
+            />
+            {line.secondaryColor && (
+              <span
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: line.secondaryColor }}
+              />
+            )}
+          </span>
           {line.name}
         </button>
       ))}

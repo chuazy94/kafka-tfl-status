@@ -131,19 +131,34 @@ export async function getAdjacencies(): Promise<Adjacency[]> {
   return result.rows;
 }
 
+// TrackerNet uses different station names than the TfL StopPoint API.
+// This alias map resolves known mismatches that can't be handled by fuzzy matching.
+const STATION_NAME_ALIASES: Record<string, string> = {
+  "edgware road (h & c)": "Edgware Road (Circle Line)",
+  "hammersmith (c&h)": "Hammersmith (H&C Line)",
+  "hammersmith (h&c)": "Hammersmith (H&C Line)",
+  "hammersmith (d&p)": "Hammersmith (Dist&Picc Line)",
+  "heathrow terminals 123": "Heathrow Terminals 2 & 3",
+  "heathrow terminal 1,2,3": "Heathrow Terminals 2 & 3",
+  "watford junction": "Watford",
+};
+
 export async function getStationByName(name: string): Promise<Station | null> {
-  // Clean up the name for matching - remove common suffixes and punctuation
   const cleanName = name
     .replace(/ Underground Station/gi, "")
     .replace(/ Station/gi, "")
-    .replace(/ Platform\s*[\d\w\s]+$/gi, "") // "Platform 1", "Platform 1 and 2"
-    .replace(/\./g, "")  // Remove periods
-    .replace(/'/g, "'")  // Normalize apostrophes
+    .replace(/ Platform\s*[\d\w\s]+$/gi, "")
+    .replace(/\./g, "")
+    .replace(/'/g, "'")
     .trim();
-  
-  // Also create a version without apostrophes for matching
-  const noApostrophe = cleanName.replace(/['']/g, "");
-  
+
+  const alias = STATION_NAME_ALIASES[cleanName.toLowerCase()];
+  const searchName = alias || cleanName;
+
+  const noApostrophe = searchName.replace(/['']/g, "");
+  const withoutParens = searchName.replace(/\s*\(.*?\)/g, "").trim();
+  const andToAmp = withoutParens.replace(/ and /gi, " & ");
+
   const result = await pool.query(`
     SELECT 
       code,
@@ -154,22 +169,23 @@ export async function getStationByName(name: string): Promise<Station | null> {
     FROM stations
     WHERE location IS NOT NULL
       AND (
-        -- Exact match (case insensitive, periods removed)
         LOWER(REPLACE(name, '.', '')) = LOWER($1)
-        -- Fuzzy match with LIKE
         OR LOWER(REPLACE(name, '.', '')) LIKE LOWER($2)
-        -- Match without apostrophes
         OR LOWER(REGEXP_REPLACE(REPLACE(name, '.', ''), '''', '', 'g')) = LOWER($3)
-        -- Starts with the search term
         OR LOWER(REPLACE(name, '.', '')) LIKE LOWER($4)
+        OR LOWER(REPLACE(name, '.', '')) = LOWER($5)
+        OR LOWER(REPLACE(REGEXP_REPLACE(name, '\\s*\\(.*?\\)', '', 'g'), '.', '')) = LOWER($6)
       )
     ORDER BY 
-      -- Prefer exact matches
-      CASE WHEN LOWER(REPLACE(name, '.', '')) = LOWER($1) THEN 0 ELSE 1 END,
-      -- Then shorter names (more specific)
+      CASE
+        WHEN LOWER(REPLACE(name, '.', '')) = LOWER($1) THEN 0
+        WHEN LOWER(REPLACE(name, '.', '')) = LOWER($5) THEN 1
+        WHEN LOWER(REPLACE(name, '.', '')) LIKE LOWER($4) THEN 2
+        ELSE 3
+      END,
       LENGTH(name)
     LIMIT 1
-  `, [cleanName, `%${cleanName}%`, noApostrophe, `${cleanName}%`]);
+  `, [searchName, `%${searchName}%`, noApostrophe, `${searchName}%`, andToAmp, withoutParens]);
   
   return result.rows[0] || null;
 }
