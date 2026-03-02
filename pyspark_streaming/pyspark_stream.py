@@ -25,6 +25,7 @@ PG_CONFIG = {
     "database": os.getenv("POSTGRES_DB", "tfl_trains"),
     "user": os.getenv("POSTGRES_USER", "tfl"),
     "password": os.getenv("POSTGRES_PASSWORD", "tfl_password"),
+    "sslmode": os.getenv("POSTGRES_SSLMODE", "prefer"),
 }
 
 # Schema for parsed predictions
