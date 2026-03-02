@@ -88,7 +88,7 @@ export default function Home() {
               </div>
               {latestTimestamp && (
                 <div style={{ fontSize: "0.7rem", color: "#6b7280" }}>
-                  Last update: {new Date(latestTimestamp).toLocaleTimeString()}
+                  Last update: {new Date(latestTimestamp).toLocaleString()}
                 </div>
               )}
             </div>

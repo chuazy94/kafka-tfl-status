@@ -44,11 +44,15 @@ interface AnimatedTrain {
   blendFromLng: number;
   blendFromLat: number;
   blendStartTime: number; // ms epoch; 0 = no blend active
+  lastSeenMs: number;     // when this train was last present in an API response
+  stale: boolean;         // true if train wasn't in the most recent API response
   properties: TrainFeature["properties"];
 }
 
-const FETCH_INTERVAL = 10000; // ms between API polls
-const BLEND_DURATION = 1500;  // ms to blend display position after new data arrives
+const FETCH_INTERVAL = 10000;      // ms between API polls
+const BLEND_DURATION = 1500;       // ms to blend display position after new data arrives
+const TRAIN_RETENTION_MS = 90000;  // keep stale trains for 90s before removing
+const OVERLAP_OFFSET = 0.00015;    // ~15m offset for overlapping trains
 
 function computeDeadReckonedPosition(train: AnimatedTrain, nowMs: number): [number, number] {
   const { fromLng, fromLat, toLng, toLat, timeToStationSeconds, dataTimestampMs } = train;
@@ -78,6 +82,13 @@ export function useTrainAnimation(lineFilter?: string) {
 
   const trainsRef = useRef<Map<string, AnimatedTrain>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
+  const prevFilterRef = useRef<string | undefined>(lineFilter);
+
+  // Clear all trains when the line filter changes
+  if (prevFilterRef.current !== lineFilter) {
+    trainsRef.current = new Map();
+    prevFilterRef.current = lineFilter;
+  }
 
   const fetchTrains = useCallback(async () => {
     try {
@@ -118,15 +129,13 @@ export function useTrainAnimation(lineFilter?: string) {
             const etaShiftMs = Math.abs(newETA - oldETA);
 
             if (etaShiftMs < 20000) {
-              // Same destination, on schedule — continue the existing trajectory unchanged.
-              // The train is already moving correctly; touching the DR params would cause a jump.
               newTrainsMap.set(trainId, {
                 ...existingTrain,
+                lastSeenMs: now,
+                stale: false,
                 properties: feature.properties,
               });
             } else {
-              // Same destination but TfL's timing estimate shifted (train delayed/early).
-              // Re-anchor from the current displayed position so there is no visual jump.
               const [currentDRLng, currentDRLat] = computeDeadReckonedPosition(
                 existingTrain,
                 now
@@ -141,12 +150,12 @@ export function useTrainAnimation(lineFilter?: string) {
                 dataTimestampMs: now,
                 timeToStationSeconds: remainingSeconds,
                 blendStartTime: 0,
+                lastSeenMs: now,
+                stale: false,
                 properties: feature.properties,
               });
             }
           } else {
-            // Destination changed (train moved to the next leg) or timing unavailable.
-            // Blend smoothly from the current displayed position to the new DR position.
             newTrainsMap.set(trainId, {
               ...existingTrain,
               fromLng,
@@ -158,30 +167,63 @@ export function useTrainAnimation(lineFilter?: string) {
               blendFromLng: existingTrain.currentLng,
               blendFromLat: existingTrain.currentLat,
               blendStartTime: now,
+              lastSeenMs: now,
+              stale: false,
               properties: feature.properties,
             });
           }
         } else {
-          // New train: compute where it should be right now and place it there immediately
-          const [initialLng, initialLat] = computeDeadReckonedPosition(
-            { fromLng, fromLat, toLng, toLat, timeToStationSeconds, dataTimestampMs } as AnimatedTrain,
-            now
-          );
-          newTrainsMap.set(trainId, {
-            id: trainId,
-            currentLng: initialLng,
-            currentLat: initialLat,
-            fromLng,
-            fromLat,
-            toLng,
-            toLat,
-            timeToStationSeconds,
-            dataTimestampMs,
-            blendFromLng: initialLng,
-            blendFromLat: initialLat,
-            blendStartTime: 0,
-            properties: feature.properties,
-          });
+          // New train — but if it was previously stale and is now returning,
+          // blend from its last known position instead of popping in
+          const staleTrain = trainsRef.current.get(trainId);
+          if (staleTrain && staleTrain.stale) {
+            newTrainsMap.set(trainId, {
+              ...staleTrain,
+              fromLng,
+              fromLat,
+              toLng,
+              toLat,
+              timeToStationSeconds,
+              dataTimestampMs,
+              blendFromLng: staleTrain.currentLng,
+              blendFromLat: staleTrain.currentLat,
+              blendStartTime: now,
+              lastSeenMs: now,
+              stale: false,
+              properties: feature.properties,
+            });
+          } else {
+            const [initialLng, initialLat] = computeDeadReckonedPosition(
+              { fromLng, fromLat, toLng, toLat, timeToStationSeconds, dataTimestampMs } as AnimatedTrain,
+              now
+            );
+            newTrainsMap.set(trainId, {
+              id: trainId,
+              currentLng: initialLng,
+              currentLat: initialLat,
+              fromLng,
+              fromLat,
+              toLng,
+              toLat,
+              timeToStationSeconds,
+              dataTimestampMs,
+              blendFromLng: initialLng,
+              blendFromLat: initialLat,
+              blendStartTime: 0,
+              lastSeenMs: now,
+              stale: false,
+              properties: feature.properties,
+            });
+          }
+        }
+      }
+
+      // Retain trains not in this response for a grace period
+      for (const [existingId, existingTrain] of trainsRef.current) {
+        if (!newTrainsMap.has(existingId)) {
+          if (now - existingTrain.lastSeenMs < TRAIN_RETENTION_MS) {
+            newTrainsMap.set(existingId, { ...existingTrain, stale: true });
+          }
         }
       }
 
@@ -251,16 +293,45 @@ export function useTrainAnimation(lineFilter?: string) {
     return () => clearInterval(interval);
   }, [fetchTrains]);
 
+  // Group trains by approximate location to detect overlaps
+  const locationGroups = new Map<string, AnimatedTrain[]>();
+  for (const train of animatedTrains) {
+    const key = `${train.currentLng.toFixed(4)},${train.currentLat.toFixed(4)}`;
+    const group = locationGroups.get(key) || [];
+    group.push(train);
+    locationGroups.set(key, group);
+  }
+
+  const geoFeatures: TrainGeoJSON["features"] = [];
+  for (const group of locationGroups.values()) {
+    if (group.length === 1) {
+      geoFeatures.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [group[0].currentLng, group[0].currentLat] },
+        properties: { ...group[0].properties, overlap_count: 1 },
+      });
+    } else {
+      const angleStep = (2 * Math.PI) / group.length;
+      for (let i = 0; i < group.length; i++) {
+        const angle = angleStep * i - Math.PI / 2;
+        geoFeatures.push({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [
+              group[i].currentLng + Math.cos(angle) * OVERLAP_OFFSET,
+              group[i].currentLat + Math.sin(angle) * OVERLAP_OFFSET,
+            ],
+          },
+          properties: { ...group[i].properties, overlap_count: group.length },
+        });
+      }
+    }
+  }
+
   const trainsGeoJSON: TrainGeoJSON = {
     type: "FeatureCollection",
-    features: animatedTrains.map((train) => ({
-      type: "Feature",
-      geometry: {
-        type: "Point",
-        coordinates: [train.currentLng, train.currentLat],
-      },
-      properties: train.properties,
-    })),
+    features: geoFeatures,
   };
 
   return {
