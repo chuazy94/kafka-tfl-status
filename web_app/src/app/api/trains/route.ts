@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLatestTrainPositions, getStationByName, Station } from "@/lib/db";
-import { calculatePosition, getNextStationFromLocation, parseLocationText, parseTimeToStation } from "@/lib/position-calculator";
+import { calculatePosition, getNextStationFromLocation, parseLocationText, parseTimeToStation, predictNextStation } from "@/lib/position-calculator";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -70,6 +70,25 @@ export async function GET(request: NextRequest) {
           }
         }
 
+        // For trains at platform (time_to_station = "-"), predict the next station
+        // so the client can animate a predicted departure after dwell time
+        let predicted_next_lat: number | null = null;
+        let predicted_next_lng: number | null = null;
+        let predicted_travel_time: number | null = null;
+
+        if (timeToStationSeconds === null && train.station_name && train.destination) {
+          const nextStn = await predictNextStation(
+            train.station_name,
+            train.destination,
+            train.line_code
+          );
+          if (nextStn) {
+            predicted_next_lat = nextStn.lat;
+            predicted_next_lng = nextStn.lng;
+            predicted_travel_time = nextStn.travelTime;
+          }
+        }
+
         return {
           ...train,
           lat,
@@ -78,6 +97,9 @@ export async function GET(request: NextRequest) {
           to_lat: toStation?.lat ?? null,
           to_lng: toStation?.lng ?? null,
           time_to_station_seconds: timeToStationSeconds,
+          predicted_next_lat,
+          predicted_next_lng,
+          predicted_travel_time,
         };
       })
     );
@@ -133,6 +155,9 @@ export async function GET(request: NextRequest) {
             to_lng: train.to_lng,
             time_to_station_seconds: train.time_to_station_seconds,
             data_timestamp: train.timestamp,
+            predicted_next_lat: train.predicted_next_lat,
+            predicted_next_lng: train.predicted_next_lng,
+            predicted_travel_time: train.predicted_travel_time,
           },
         };
       }),
