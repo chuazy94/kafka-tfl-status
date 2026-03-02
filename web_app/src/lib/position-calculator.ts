@@ -401,6 +401,52 @@ export async function calculatePosition(
 }
 
 /**
+ * Predict the next station a train will depart toward, based on its
+ * current station and the direction of its final destination.
+ * Uses straight-line distance as a heuristic to pick the correct neighbor.
+ */
+export async function predictNextStation(
+  currentStationName: string,
+  destinationName: string,
+  lineCode?: string
+): Promise<{ lat: number; lng: number; travelTime: number } | null> {
+  // Skip prediction at terminal stations (train has reached its destination
+  // and will reverse — we can't reliably predict the new direction)
+  const normCurrent = currentStationName.replace(/\./g, "").trim().toLowerCase();
+  const normDest = destinationName.replace(/\./g, "").trim().toLowerCase();
+  if (normCurrent === normDest) return null;
+
+  if (!adjacencyCache) {
+    adjacencyCache = await getAdjacencies();
+  }
+
+  const currentStation = await getStationByName(currentStationName);
+  if (!currentStation) return null;
+
+  const destStation = await getStationByName(destinationName);
+  if (!destStation) return null;
+
+  // Also skip if the resolved station codes match (handles naming variants)
+  if (currentStation.code === destStation.code) return null;
+
+  const neighbors = findConnectedStations(adjacencyCache, currentStation.code, lineCode);
+  if (neighbors.length === 0) return null;
+  if (neighbors.length === 1) return neighbors[0];
+
+  // Pick the neighbor whose straight-line distance to the destination is smallest
+  let best = neighbors[0];
+  let bestDist = Infinity;
+  for (const n of neighbors) {
+    const d = (n.lat - destStation.lat) ** 2 + (n.lng - destStation.lng) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      best = n;
+    }
+  }
+  return best;
+}
+
+/**
  * Clear the adjacency cache (useful after importing new data).
  */
 export function clearAdjacencyCache(): void {

@@ -40,6 +40,10 @@ interface AnimatedTrain {
   toLat: number | null;
   timeToStationSeconds: number | null;
   dataTimestampMs: number;
+  // Predicted departure: the next station when currently at platform
+  predictedNextLng: number | null;
+  predictedNextLat: number | null;
+  predictedTravelTime: number | null;
   // Blend state: smoothly reconcile display position when new data arrives
   blendFromLng: number;
   blendFromLat: number;
@@ -49,29 +53,41 @@ interface AnimatedTrain {
   properties: TrainFeature["properties"];
 }
 
-const FETCH_INTERVAL = 10000;      // ms between API polls
-const BLEND_DURATION = 1500;       // ms to blend display position after new data arrives
-const TRAIN_RETENTION_MS = 90000;  // keep stale trains for 90s before removing
-const OVERLAP_OFFSET = 0.00015;    // ~15m offset for overlapping trains
+const FETCH_INTERVAL = 10000;          // ms between API polls
+const BLEND_DURATION = 1500;           // ms to blend display position after new data arrives
+const TRAIN_RETENTION_MS = 90000;      // keep stale trains for 90s before removing
+const OVERLAP_OFFSET = 0.00015;        // ~15m offset for overlapping trains
+const PLATFORM_DWELL_MS = 30000;       // start predicted departure after 30s at platform
+const PREDICTED_DEPARTURE_CAP = 0.35;  // don't predict beyond 35% of the way to next station
 
 function computeDeadReckonedPosition(train: AnimatedTrain, nowMs: number): [number, number] {
   const { fromLng, fromLat, toLng, toLat, timeToStationSeconds, dataTimestampMs } = train;
 
-  if (toLng === null || toLat === null || timeToStationSeconds === null) {
-    return [fromLng, fromLat];
+  // Normal dead-reckoning: train is moving toward a known destination with an ETA
+  if (toLng !== null && toLat !== null && timeToStationSeconds !== null && timeToStationSeconds > 0) {
+    const elapsedSeconds = Math.max(0, (nowMs - dataTimestampMs) / 1000);
+    const fraction = Math.min(1, elapsedSeconds / timeToStationSeconds);
+    return [
+      fromLng + (toLng - fromLng) * fraction,
+      fromLat + (toLat - fromLat) * fraction,
+    ];
   }
 
-  if (timeToStationSeconds <= 0) {
-    // Train is at the destination station
-    return [toLng, toLat];
+  // Train at platform with predicted next station: after dwell, start moving
+  if (timeToStationSeconds === null && train.predictedNextLng !== null && train.predictedNextLat !== null) {
+    const dwellMs = nowMs - dataTimestampMs;
+    if (dwellMs > PLATFORM_DWELL_MS) {
+      const travelTime = train.predictedTravelTime ?? 120;
+      const departureElapsed = (dwellMs - PLATFORM_DWELL_MS) / 1000;
+      const fraction = Math.min(PREDICTED_DEPARTURE_CAP, departureElapsed / travelTime);
+      return [
+        fromLng + (train.predictedNextLng - fromLng) * fraction,
+        fromLat + (train.predictedNextLat - fromLat) * fraction,
+      ];
+    }
   }
 
-  const elapsedSeconds = Math.max(0, (nowMs - dataTimestampMs) / 1000);
-  const fraction = Math.min(1, elapsedSeconds / timeToStationSeconds);
-  return [
-    fromLng + (toLng - fromLng) * fraction,
-    fromLat + (toLat - fromLat) * fraction,
-  ];
+  return [fromLng, fromLat];
 }
 
 export function useTrainAnimation(lineFilter?: string) {
@@ -109,6 +125,9 @@ export function useTrainAnimation(lineFilter?: string) {
         const toLng = feature.properties.to_lng ?? null;
         const toLat = feature.properties.to_lat ?? null;
         const timeToStationSeconds = feature.properties.time_to_station_seconds ?? null;
+        const predictedNextLng = (feature.properties.predicted_next_lng as number) ?? null;
+        const predictedNextLat = (feature.properties.predicted_next_lat as number) ?? null;
+        const predictedTravelTime = (feature.properties.predicted_travel_time as number) ?? null;
         const dataTimestampMs = feature.properties.data_timestamp
           ? new Date(feature.properties.data_timestamp).getTime()
           : now;
@@ -131,6 +150,7 @@ export function useTrainAnimation(lineFilter?: string) {
             if (etaShiftMs < 20000) {
               newTrainsMap.set(trainId, {
                 ...existingTrain,
+                predictedNextLng, predictedNextLat, predictedTravelTime,
                 lastSeenMs: now,
                 stale: false,
                 properties: feature.properties,
@@ -149,6 +169,7 @@ export function useTrainAnimation(lineFilter?: string) {
                 toLat,
                 dataTimestampMs: now,
                 timeToStationSeconds: remainingSeconds,
+                predictedNextLng, predictedNextLat, predictedTravelTime,
                 blendStartTime: 0,
                 lastSeenMs: now,
                 stale: false,
@@ -164,6 +185,7 @@ export function useTrainAnimation(lineFilter?: string) {
               toLat,
               timeToStationSeconds,
               dataTimestampMs,
+              predictedNextLng, predictedNextLat, predictedTravelTime,
               blendFromLng: existingTrain.currentLng,
               blendFromLat: existingTrain.currentLat,
               blendStartTime: now,
@@ -173,8 +195,6 @@ export function useTrainAnimation(lineFilter?: string) {
             });
           }
         } else {
-          // New train — but if it was previously stale and is now returning,
-          // blend from its last known position instead of popping in
           const staleTrain = trainsRef.current.get(trainId);
           if (staleTrain && staleTrain.stale) {
             newTrainsMap.set(trainId, {
@@ -185,6 +205,7 @@ export function useTrainAnimation(lineFilter?: string) {
               toLat,
               timeToStationSeconds,
               dataTimestampMs,
+              predictedNextLng, predictedNextLat, predictedTravelTime,
               blendFromLng: staleTrain.currentLng,
               blendFromLat: staleTrain.currentLat,
               blendStartTime: now,
@@ -194,7 +215,7 @@ export function useTrainAnimation(lineFilter?: string) {
             });
           } else {
             const [initialLng, initialLat] = computeDeadReckonedPosition(
-              { fromLng, fromLat, toLng, toLat, timeToStationSeconds, dataTimestampMs } as AnimatedTrain,
+              { fromLng, fromLat, toLng, toLat, timeToStationSeconds, dataTimestampMs, predictedNextLng, predictedNextLat, predictedTravelTime } as AnimatedTrain,
               now
             );
             newTrainsMap.set(trainId, {
@@ -207,6 +228,7 @@ export function useTrainAnimation(lineFilter?: string) {
               toLat,
               timeToStationSeconds,
               dataTimestampMs,
+              predictedNextLng, predictedNextLat, predictedTravelTime,
               blendFromLng: initialLng,
               blendFromLat: initialLat,
               blendStartTime: 0,
