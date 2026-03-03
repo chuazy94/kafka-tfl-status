@@ -63,9 +63,9 @@ services:
     entrypoint: /bin/sh
     command: >
       -c "while true; do
-        sleep 3600;
+        sleep 600;
         echo \"[$$(date)] Running cleanup...\";
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"SELECT cleanup_old_train_positions(INTERVAL '4 hours');\";
+        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"SELECT cleanup_old_train_positions(INTERVAL '2 hours'); VACUUM train_positions;\";
       done"
     restart: unless-stopped
 
