@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 
-// Create a connection pool
+const isProduction = process.env.POSTGRES_HOST && !process.env.POSTGRES_HOST.includes("localhost");
+
 const pool = new Pool({
   host: process.env.POSTGRES_HOST || "localhost",
   port: parseInt(process.env.POSTGRES_PORT || "5435"),
@@ -10,6 +11,7 @@ const pool = new Pool({
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
+  ssl: isProduction ? { rejectUnauthorized: false } : false,
 });
 
 export interface Station {
