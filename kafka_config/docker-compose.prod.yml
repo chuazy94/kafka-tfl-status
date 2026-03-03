@@ -58,12 +58,14 @@ services:
     container_name: db-cleanup
     env_file:
       - ../.env.prod
+    environment:
+      PGSSLMODE: require
     entrypoint: /bin/sh
     command: >
       -c "while true; do
         sleep 3600;
         echo \"[$$(date)] Running cleanup...\";
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB \"sslmode=require\" -c \"SELECT cleanup_old_train_positions(INTERVAL '4 hours');\";
+        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"SELECT cleanup_old_train_positions(INTERVAL '4 hours');\";
       done"
     restart: unless-stopped
 
