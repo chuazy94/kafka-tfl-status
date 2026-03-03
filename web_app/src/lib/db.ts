@@ -8,9 +8,9 @@ const pool = new Pool({
   database: process.env.POSTGRES_DB || "tfl_trains",
   user: process.env.POSTGRES_USER || "tfl",
   password: process.env.POSTGRES_PASSWORD || "tfl_password",
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  max: isProduction ? 3 : 10,
+  idleTimeoutMillis: isProduction ? 10000 : 30000,
+  connectionTimeoutMillis: isProduction ? 10000 : 2000,
   ssl: isProduction ? { rejectUnauthorized: false } : false,
 });
 
