@@ -1,18 +1,25 @@
-import { Pool } from "pg";
+import { Pool as PgPool } from "pg";
+import { Pool as NeonPool } from "@neondatabase/serverless";
 
-const isProduction = process.env.POSTGRES_HOST && !process.env.POSTGRES_HOST.includes("localhost");
+const isProduction = !!process.env.DATABASE_URL;
 
-const pool = new Pool({
-  host: process.env.POSTGRES_HOST || "localhost",
-  port: parseInt(process.env.POSTGRES_PORT || "5435"),
-  database: process.env.POSTGRES_DB || "tfl_trains",
-  user: process.env.POSTGRES_USER || "tfl",
-  password: process.env.POSTGRES_PASSWORD || "tfl_password",
-  max: isProduction ? 3 : 10,
-  idleTimeoutMillis: isProduction ? 10000 : 30000,
-  connectionTimeoutMillis: isProduction ? 10000 : 2000,
-  ssl: isProduction ? { rejectUnauthorized: false } : false,
-});
+const pool = isProduction
+  ? new NeonPool({ connectionString: process.env.DATABASE_URL })
+  : new PgPool({
+      host: process.env.POSTGRES_HOST || "localhost",
+      port: parseInt(process.env.POSTGRES_PORT || "5435"),
+      database: process.env.POSTGRES_DB || "tfl_trains",
+      user: process.env.POSTGRES_USER || "tfl",
+      password: process.env.POSTGRES_PASSWORD || "tfl_password",
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function query(text: string, params?: unknown[]): Promise<{ rows: any[] }> {
+  return pool.query(text, params);
+}
 
 export interface Station {
   code: string;
@@ -57,7 +64,7 @@ export interface Adjacency {
 }
 
 export async function getStations(): Promise<Station[]> {
-  const result = await pool.query(`
+  const result = await query(`
     SELECT 
       code,
       name,
@@ -69,21 +76,21 @@ export async function getStations(): Promise<Station[]> {
     ORDER BY name
   `);
   
-  return result.rows;
+  return result.rows as Station[];
 }
 
 export async function getLines(): Promise<Line[]> {
-  const result = await pool.query(`
+  const result = await query(`
     SELECT code, name, color
     FROM lines
     ORDER BY name
   `);
   
-  return result.rows;
+  return result.rows as Line[];
 }
 
 export async function getLatestTrainPositions(lineCode?: string): Promise<TrainPosition[]> {
-  let query = `
+  let sql = `
     SELECT 
       id,
       set_number,
@@ -105,18 +112,18 @@ export async function getLatestTrainPositions(lineCode?: string): Promise<TrainP
   const params: string[] = [];
   
   if (lineCode) {
-    query += ` WHERE line_code = $1`;
+    sql += ` WHERE line_code = $1`;
     params.push(lineCode);
   }
   
-  query += ` ORDER BY line_code, set_number`;
+  sql += ` ORDER BY line_code, set_number`;
   
-  const result = await pool.query(query, params);
-  return result.rows;
+  const result = await query(sql, params);
+  return result.rows as TrainPosition[];
 }
 
 export async function getAdjacencies(): Promise<Adjacency[]> {
-  const result = await pool.query(`
+  const result = await query(`
     SELECT 
       sa.line_code,
       sa.from_station_code,
@@ -130,7 +137,7 @@ export async function getAdjacencies(): Promise<Adjacency[]> {
     WHERE sa.segment_geometry IS NOT NULL
   `);
   
-  return result.rows;
+  return result.rows as Adjacency[];
 }
 
 // TrackerNet uses different station names than the TfL StopPoint API.
@@ -161,7 +168,7 @@ export async function getStationByName(name: string): Promise<Station | null> {
   const withoutParens = searchName.replace(/\s*\(.*?\)/g, "").trim();
   const andToAmp = withoutParens.replace(/ and /gi, " & ");
 
-  const result = await pool.query(`
+  const result = await query(`
     SELECT 
       code,
       name,
@@ -189,7 +196,5 @@ export async function getStationByName(name: string): Promise<Station | null> {
     LIMIT 1
   `, [searchName, `%${searchName}%`, noApostrophe, `${searchName}%`, andToAmp, withoutParens]);
   
-  return result.rows[0] || null;
+  return (result.rows[0] as Station) || null;
 }
-
-export { pool };
