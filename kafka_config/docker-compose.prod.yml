@@ -65,7 +65,8 @@ services:
       -c "while true; do
         sleep 600;
         echo \"[$$(date)] Running cleanup...\";
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"SELECT cleanup_old_train_positions(INTERVAL '2 hours'); VACUUM train_positions;\";
+        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"SELECT cleanup_old_train_positions(INTERVAL '2 hours');\";
+        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"VACUUM train_positions;\";
       done"
     restart: unless-stopped
 
