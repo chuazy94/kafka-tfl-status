@@ -99,17 +99,23 @@ export function useTrainAnimation(lineFilter?: string) {
   const trainsRef = useRef<Map<string, AnimatedTrain>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
   const prevFilterRef = useRef<string | undefined>(lineFilter);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Clear all trains when the line filter changes
+  // Clear all trains and abort in-flight fetch when the line filter changes
   if (prevFilterRef.current !== lineFilter) {
     trainsRef.current = new Map();
     prevFilterRef.current = lineFilter;
+    abortControllerRef.current?.abort();
+    setIsLoading(true);
   }
 
   const fetchTrains = useCallback(async () => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const url = lineFilter ? `/api/trains?line=${lineFilter}` : "/api/trains";
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
       if (!response.ok) throw new Error("Failed to fetch trains");
 
       const data: TrainGeoJSON = await response.json();
@@ -240,9 +246,11 @@ export function useTrainAnimation(lineFilter?: string) {
         }
       }
 
-      // Retain trains not in this response for a grace period
+      // Retain trains not in this response for a grace period.
+      // When filtering by line, don't retain trains from other lines (avoids stale cross-line display).
       for (const [existingId, existingTrain] of trainsRef.current) {
         if (!newTrainsMap.has(existingId)) {
+          if (lineFilter && existingTrain.properties.line_code !== lineFilter) continue;
           if (now - existingTrain.lastSeenMs < TRAIN_RETENTION_MS) {
             newTrainsMap.set(existingId, { ...existingTrain, stale: true });
           }
@@ -262,6 +270,7 @@ export function useTrainAnimation(lineFilter?: string) {
       setIsLoading(false);
       setError(null);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Unknown error");
       setIsLoading(false);
     }
