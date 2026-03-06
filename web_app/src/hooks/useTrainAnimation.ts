@@ -117,7 +117,7 @@ export function useTrainAnimation(lineFilter?: string) {
       const newTrainsMap = new Map<string, AnimatedTrain>();
 
       for (const feature of data.features) {
-        const trainId = feature.properties.set_number;
+        const trainId = `${feature.properties.set_number}-${feature.properties.line_code}`;
         const [lng, lat] = feature.geometry.coordinates;
 
         const fromLng = feature.properties.from_lng ?? lng;

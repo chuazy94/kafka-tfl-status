@@ -1,16 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLatestTrainPositions, getStationByName, Station } from "@/lib/db";
+import { getLatestTrainPositions, getStationByName, isStationOnLine, Station, type TrainPosition } from "@/lib/db";
 import { calculatePosition, getNextStationFromLocation, parseLocationText, parseTimeToStation, predictNextStation } from "@/lib/position-calculator";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+/**
+ * Filter out spurious duplicate records: when the same physical train appears on multiple
+ * lines (e.g. 205 on D, H, M) with the same current_location, keep only records where
+ * the location station is actually on that line. North Wembley is Bakerloo-only, so
+ * 205-D/205-H/205-M with "At North Wembley" are excluded.
+ */
+async function filterTrainsByLineValidation(trains: TrainPosition[]): Promise<TrainPosition[]> {
+  const filtered: TrainPosition[] = [];
+  for (const train of trains) {
+    const parsed = parseLocationText(train.current_location);
+    let stationNames: string[] = [];
+
+    if (parsed.type === "at") {
+      stationNames = parsed.station1 ? [parsed.station1] : (train.station_name ? [train.station_name] : []);
+    } else if (parsed.type === "approaching" || parsed.type === "left") {
+      stationNames = parsed.station1 ? [parsed.station1] : [];
+    } else if (parsed.type === "between") {
+      stationNames = parsed.station1 && parsed.station2 ? [parsed.station1, parsed.station2] : [];
+    } else {
+      // unknown - fall back to station_name
+      stationNames = train.station_name ? [train.station_name] : [];
+    }
+
+    if (stationNames.length === 0) {
+      filtered.push(train);
+      continue;
+    }
+
+    let allOnLine = true;
+    for (const name of stationNames) {
+      const station = await getStationByName(name);
+      if (!station) {
+        allOnLine = false;
+        break;
+      }
+      const onLine = await isStationOnLine(station.code, train.line_code);
+      if (!onLine) {
+        allOnLine = false;
+        break;
+      }
+    }
+    if (allOnLine) {
+      filtered.push(train);
+    }
+  }
+  return filtered;
+}
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const lineCode = searchParams.get("line") || undefined;
 
-    const trains = await getLatestTrainPositions(lineCode);
+    let trains = await getLatestTrainPositions(lineCode);
+    trains = await filterTrainsByLineValidation(trains);
 
     // Pre-fetch all unique destination stations in parallel to avoid per-train DB calls
     const uniqueStationNames = [...new Set(trains.map((t) => t.station_name).filter(Boolean))];

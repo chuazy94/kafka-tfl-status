@@ -94,7 +94,7 @@ batch_records AS (
     FROM train_positions tp, latest_batch lb
     WHERE tp.timestamp >= lb.batch_ts - INTERVAL '2 minutes'
 )
-SELECT DISTINCT ON (set_number)
+SELECT DISTINCT ON (set_number, line_code)
     id,
     set_number,
     trip_number,
@@ -112,6 +112,7 @@ SELECT DISTINCT ON (set_number)
 FROM batch_records
 ORDER BY 
     set_number,
+    line_code,
     timestamp DESC,
     CASE 
         WHEN time_to_station = '-' THEN 0

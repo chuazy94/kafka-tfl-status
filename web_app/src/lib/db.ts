@@ -122,6 +122,17 @@ export async function getLatestTrainPositions(lineCode?: string): Promise<TrainP
   return result.rows as TrainPosition[];
 }
 
+/** Check if a station exists on a given line (has at least one adjacency). */
+export async function isStationOnLine(stationCode: string, lineCode: string): Promise<boolean> {
+  const result = await query(
+    `SELECT 1 FROM station_adjacency 
+     WHERE line_code = $1 AND (from_station_code = $2 OR to_station_code = $2) 
+     LIMIT 1`,
+    [lineCode, stationCode]
+  );
+  return result.rows.length > 0;
+}
+
 export async function getAdjacencies(): Promise<Adjacency[]> {
   const result = await query(`
     SELECT 

@@ -188,6 +188,19 @@ function findAdjacency(
 }
 
 /**
+ * Check whether a station exists on a given line (has at least one adjacency for it).
+ * If no lineCode is provided, always returns true.
+ */
+function isStationOnLine(adjacencies: Adjacency[], stationCode: string, lineCode?: string): boolean {
+  if (!lineCode) return true;
+  return adjacencies.some(
+    (adj) =>
+      adj.line_code === lineCode &&
+      (adj.from_station_code === stationCode || adj.to_station_code === stationCode)
+  );
+}
+
+/**
  * Find all adjacencies connected to a station on a given line.
  * Returns them as { neighborCode, neighborLat, neighborLng, travelTime }
  * normalized so the station in question is always the "from" side.
@@ -269,13 +282,24 @@ export async function calculatePosition(
       if (!parsed.station1) return null;
 
       const targetStation = await getStationByName(parsed.station1);
-      if (!targetStation) return null;
+
+      // Only use current_location if the station actually exists on this line.
+      // e.g. "Approaching Wood Lane" for a Met train should be ignored — Wood Lane
+      // is H&C only. Fall back to station_name (the platform the train is at).
+      if (!targetStation || !isStationOnLine(adjacencyCache, targetStation.code, lineCode)) {
+        if (targetStationName) {
+          const stationAtPlatform = await getStationByName(targetStationName);
+          if (stationAtPlatform) {
+            return { lat: stationAtPlatform.lat, lng: stationAtPlatform.lng, confidence: "estimated" };
+          }
+        }
+        return null;
+      }
 
       const neighbors = findConnectedStations(adjacencyCache, targetStation.code, lineCode);
       if (neighbors.length > 0) {
         // Pick the neighbor that is NOT the targetStationName (the station we're heading to
         // is targetStation itself, so the neighbor is where we're coming from).
-        // If targetStationName matches a neighbor, avoid it — that's ahead, not behind.
         const targetStationObj = targetStationName
           ? await getStationByName(targetStationName)
           : null;
@@ -296,20 +320,25 @@ export async function calculatePosition(
         return { ...pos, confidence: seconds !== null ? "interpolated" : "estimated" };
       }
 
-      return {
-        lat: targetStation.lat,
-        lng: targetStation.lng,
-        confidence: "estimated",
-      };
+      return { lat: targetStation.lat, lng: targetStation.lng, confidence: "estimated" };
     }
 
     case "left": {
       if (!parsed.station1) return null;
 
       const departedStation = await getStationByName(parsed.station1);
-      if (!departedStation) return null;
 
-      // targetStationName is the next station the train is heading to
+      // Only use current_location if the departed station is on this line.
+      if (!departedStation || !isStationOnLine(adjacencyCache, departedStation.code, lineCode)) {
+        if (targetStationName) {
+          const stationAtPlatform = await getStationByName(targetStationName);
+          if (stationAtPlatform) {
+            return { lat: stationAtPlatform.lat, lng: stationAtPlatform.lng, confidence: "estimated" };
+          }
+        }
+        return null;
+      }
+
       const nextStationObj = targetStationName
         ? await getStationByName(targetStationName)
         : null;
@@ -317,7 +346,6 @@ export async function calculatePosition(
       const neighbors = findConnectedStations(adjacencyCache, departedStation.code, lineCode);
 
       if (nextStationObj) {
-        // We know exactly where the train is headed — find that adjacency
         const toward = neighbors.find((n) => n.code === nextStationObj.code);
         if (toward) {
           const seconds = parseTimeToStation(timeToStation);
@@ -334,7 +362,6 @@ export async function calculatePosition(
         }
       }
 
-      // Fallback: pick first available neighbor
       if (neighbors.length > 0) {
         const neighbor = neighbors[0];
         const seconds = parseTimeToStation(timeToStation);
@@ -350,11 +377,7 @@ export async function calculatePosition(
         return { ...pos, confidence: seconds !== null ? "interpolated" : "estimated" };
       }
 
-      return {
-        lat: departedStation.lat,
-        lng: departedStation.lng,
-        confidence: "estimated",
-      };
+      return { lat: departedStation.lat, lng: departedStation.lng, confidence: "estimated" };
     }
 
     case "between": {
@@ -363,7 +386,20 @@ export async function calculatePosition(
       const station1 = await getStationByName(parsed.station1);
       const station2 = await getStationByName(parsed.station2);
 
-      if (!station1 || !station2) return null;
+      // Only use current_location if both stations are on this line.
+      if (
+        !station1 || !station2 ||
+        !isStationOnLine(adjacencyCache, station1.code, lineCode) ||
+        !isStationOnLine(adjacencyCache, station2.code, lineCode)
+      ) {
+        if (targetStationName) {
+          const stationAtPlatform = await getStationByName(targetStationName);
+          if (stationAtPlatform) {
+            return { lat: stationAtPlatform.lat, lng: stationAtPlatform.lng, confidence: "estimated" };
+          }
+        }
+        return null;
+      }
 
       const adjacency = findAdjacency(adjacencyCache, station1.code, station2.code, lineCode);
       const segmentTime = getSegmentTravelTime(adjacency);
