@@ -1,31 +1,66 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLatestTrainPositions, getStationByName, isStationOnLine, Station, type TrainPosition } from "@/lib/db";
+import { getLatestTrainPositions, getStationByName, getStationCodesOnLine, Station, type TrainPosition } from "@/lib/db";
 import { calculatePosition, getNextStationFromLocation, parseLocationText, parseTimeToStation, predictNextStation } from "@/lib/position-calculator";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+/** Collect all station names needed for filtering (from current_location parsing). */
+function getStationNamesForFilter(trains: TrainPosition[]): Set<string> {
+  const names = new Set<string>();
+  for (const train of trains) {
+    const parsed = parseLocationText(train.current_location);
+    if (parsed.type === "at") {
+      if (parsed.station1) names.add(parsed.station1);
+      else if (train.station_name) names.add(train.station_name.replace(/\.$/, "").trim());
+    } else if (parsed.type === "approaching" || parsed.type === "left") {
+      if (parsed.station1) names.add(parsed.station1);
+    } else if (parsed.type === "between" && parsed.station1 && parsed.station2) {
+      names.add(parsed.station1);
+      names.add(parsed.station2);
+    } else if (train.station_name) {
+      names.add(train.station_name.replace(/\.$/, "").trim());
+    }
+  }
+  return names;
+}
+
+/** Collect all station names needed for position calculation and prediction. */
+function getStationNamesForPositions(trains: TrainPosition[]): Set<string> {
+  const names = new Set<string>();
+  for (const train of trains) {
+    if (train.station_name) names.add(train.station_name.replace(/\.$/, "").trim());
+    if (train.destination) names.add(train.destination.replace(/\.$/, "").trim());
+    const parsed = parseLocationText(train.current_location);
+    if (parsed.station1) names.add(parsed.station1);
+    if (parsed.station2) names.add(parsed.station2);
+  }
+  return names;
+}
+
 /**
  * Filter out spurious duplicate records: when the same physical train appears on multiple
  * lines (e.g. 205 on D, H, M) with the same current_location, keep only records where
- * the location station is actually on that line. North Wembley is Bakerloo-only, so
- * 205-D/205-H/205-M with "At North Wembley" are excluded.
+ * the location station is actually on that line.
  */
-async function filterTrainsByLineValidation(trains: TrainPosition[]): Promise<TrainPosition[]> {
+function filterTrainsByLineValidation(
+  trains: TrainPosition[],
+  stationCache: Map<string, Station | null>,
+  stationsOnLineByLine: Map<string, Set<string>>
+): TrainPosition[] {
   const filtered: TrainPosition[] = [];
   for (const train of trains) {
     const parsed = parseLocationText(train.current_location);
     let stationNames: string[] = [];
 
     if (parsed.type === "at") {
-      stationNames = parsed.station1 ? [parsed.station1] : (train.station_name ? [train.station_name] : []);
+      stationNames = parsed.station1 ? [parsed.station1] : (train.station_name ? [train.station_name.replace(/\.$/, "").trim()] : []);
     } else if (parsed.type === "approaching" || parsed.type === "left") {
       stationNames = parsed.station1 ? [parsed.station1] : [];
     } else if (parsed.type === "between") {
       stationNames = parsed.station1 && parsed.station2 ? [parsed.station1, parsed.station2] : [];
     } else {
-      // unknown - fall back to station_name
-      stationNames = train.station_name ? [train.station_name] : [];
+      stationNames = train.station_name ? [train.station_name.replace(/\.$/, "").trim()] : [];
     }
 
     if (stationNames.length === 0) {
@@ -33,22 +68,12 @@ async function filterTrainsByLineValidation(trains: TrainPosition[]): Promise<Tr
       continue;
     }
 
-    let allOnLine = true;
-    for (const name of stationNames) {
-      const station = await getStationByName(name);
-      if (!station) {
-        allOnLine = false;
-        break;
-      }
-      const onLine = await isStationOnLine(station.code, train.line_code);
-      if (!onLine) {
-        allOnLine = false;
-        break;
-      }
-    }
-    if (allOnLine) {
-      filtered.push(train);
-    }
+    const stationsOnLine = train.line_code ? stationsOnLineByLine.get(train.line_code) : new Set<string>();
+    const allOnLine = !train.line_code || (stationsOnLine && stationNames.every((name) => {
+      const station = stationCache.get(name) ?? stationCache.get(name.replace(/\.$/, "").trim());
+      return station && stationsOnLine.has(station.code);
+    }));
+    if (allOnLine) filtered.push(train);
   }
   return filtered;
 }
@@ -58,27 +83,41 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const lineCode = searchParams.get("line") || undefined;
 
-    let trains = await getLatestTrainPositions(lineCode);
-    trains = await filterTrainsByLineValidation(trains);
+    const trains = await getLatestTrainPositions(lineCode);
 
-    // Pre-fetch all unique destination stations in parallel to avoid per-train DB calls
-    const uniqueStationNames = [...new Set(trains.map((t) => t.station_name).filter(Boolean))];
+    // Batch-fetch all stations needed (filter + positions + predictions) in parallel
+    const filterNames = getStationNamesForFilter(trains);
+    const positionNames = getStationNamesForPositions(trains);
+    const allNames = [...new Set([...filterNames, ...positionNames])];
+    const uniqueLineCodes = [...new Set(trains.map((t) => t.line_code).filter(Boolean))];
+
+    const [stationResults, ...lineResults] = await Promise.all([
+      Promise.all(allNames.map((name) => getStationByName(name))),
+      ...uniqueLineCodes.map((lc) => getStationCodesOnLine(lc!)),
+    ]);
+
     const stationCache = new Map<string, Station | null>();
-    await Promise.all(
-      uniqueStationNames.map(async (name) => {
-        stationCache.set(name, await getStationByName(name));
-      })
-    );
+    allNames.forEach((name, i) => {
+      stationCache.set(name, stationResults[i]);
+    });
+
+    const stationsOnLineByLine = new Map<string, Set<string>>();
+    uniqueLineCodes.forEach((lc, i) => {
+      if (lc) stationsOnLineByLine.set(lc, lineResults[i] as Set<string>);
+    });
+
+    const filteredTrains = filterTrainsByLineValidation(trains, stationCache, stationsOnLineByLine);
 
     // Track statistics for debugging
     let positioned = 0;
     let fallbackUsed = 0;
     let missing = 0;
 
-    // Calculate positions for ALL trains - try multiple fallbacks
+    // Calculate positions for ALL trains - try multiple fallbacks (stationCache avoids per-train DB calls)
     const trainsWithPositions = await Promise.all(
-      trains.map(async (train) => {
-        const toStation = stationCache.get(train.station_name) ?? null;
+      filteredTrains.map(async (train) => {
+        const stationKey = train.station_name?.replace(/\.$/, "").trim() ?? "";
+        const toStation = stationCache.get(stationKey) ?? null;
         const timeToStationSeconds = parseTimeToStation(train.time_to_station);
 
         let lat: number | null = null;
@@ -92,12 +131,13 @@ export async function GET(request: NextRequest) {
           position_confidence = "precalculated";
           positioned++;
         } else {
-          // Priority 2: Calculate from current_location text
+          // Priority 2: Calculate from current_location text (stationCache avoids DB calls)
           const position = await calculatePosition(
             train.current_location,
             train.time_to_station,
             train.station_name,
-            train.line_code
+            train.line_code,
+            stationCache
           );
 
           if (position) {
@@ -129,7 +169,8 @@ export async function GET(request: NextRequest) {
           const nextStn = await predictNextStation(
             train.station_name,
             train.destination,
-            train.line_code
+            train.line_code,
+            stationCache
           );
           if (nextStn) {
             predicted_next_lat = nextStn.lat;
@@ -161,7 +202,7 @@ export async function GET(request: NextRequest) {
     // Log statistics periodically
     if (missing > 0) {
       console.log(
-        `Train positions: ${positioned} calculated, ${fallbackUsed} fallback, ${missing} missing (${validTrains.length}/${trains.length} shown)`
+        `Train positions: ${positioned} calculated, ${fallbackUsed} fallback, ${missing} missing (${validTrains.length}/${filteredTrains.length} shown)`
       );
     }
 

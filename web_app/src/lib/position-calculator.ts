@@ -3,6 +3,12 @@ import { getStationByName, getAdjacencies, Station, Adjacency } from "./db";
 // Cache for adjacencies
 let adjacencyCache: Adjacency[] | null = null;
 
+function resolveStation(name: string, cache?: Map<string, Station | null>): Station | null {
+  if (!name) return null;
+  if (cache) return cache.get(name) ?? cache.get(name.replace(/\.$/, "").trim()) ?? null;
+  return null;
+}
+
 interface CalculatedPosition {
   lat: number;
   lng: number;
@@ -250,12 +256,14 @@ function timeFraction(timeToStationSeconds: number | null, segmentSeconds: numbe
 
 /**
  * Calculate position based on location text, time to station, and line.
+ * Pass stationCache to avoid per-call DB lookups (batch mode).
  */
 export async function calculatePosition(
   currentLocation: string,
   timeToStation: string,
   targetStationName?: string,
-  lineCode?: string
+  lineCode?: string,
+  stationCache?: Map<string, Station | null>
 ): Promise<CalculatedPosition | null> {
   const parsed = parseLocationText(currentLocation);
 
@@ -263,12 +271,15 @@ export async function calculatePosition(
     adjacencyCache = await getAdjacencies();
   }
 
+  const getStationAsync = async (name: string) =>
+    stationCache ? resolveStation(name, stationCache) : getStationByName(name);
+
   switch (parsed.type) {
     case "at": {
       const stationName = parsed.station1 || targetStationName;
       if (!stationName) return null;
 
-      const station = await getStationByName(stationName);
+      const station = await getStationAsync(stationName);
       if (!station) return null;
 
       return {
@@ -281,14 +292,12 @@ export async function calculatePosition(
     case "approaching": {
       if (!parsed.station1) return null;
 
-      const targetStation = await getStationByName(parsed.station1);
+      const targetStation = await getStationAsync(parsed.station1);
 
       // Only use current_location if the station actually exists on this line.
-      // e.g. "Approaching Wood Lane" for a Met train should be ignored — Wood Lane
-      // is H&C only. Fall back to station_name (the platform the train is at).
       if (!targetStation || !isStationOnLine(adjacencyCache, targetStation.code, lineCode)) {
         if (targetStationName) {
-          const stationAtPlatform = await getStationByName(targetStationName);
+          const stationAtPlatform = await getStationAsync(targetStationName);
           if (stationAtPlatform) {
             return { lat: stationAtPlatform.lat, lng: stationAtPlatform.lng, confidence: "estimated" };
           }
@@ -298,10 +307,8 @@ export async function calculatePosition(
 
       const neighbors = findConnectedStations(adjacencyCache, targetStation.code, lineCode);
       if (neighbors.length > 0) {
-        // Pick the neighbor that is NOT the targetStationName (the station we're heading to
-        // is targetStation itself, so the neighbor is where we're coming from).
         const targetStationObj = targetStationName
-          ? await getStationByName(targetStationName)
+          ? await getStationAsync(targetStationName)
           : null;
         const prevStation =
           neighbors.find((n) => !targetStationObj || n.code !== targetStationObj.code)
@@ -326,12 +333,12 @@ export async function calculatePosition(
     case "left": {
       if (!parsed.station1) return null;
 
-      const departedStation = await getStationByName(parsed.station1);
+      const departedStation = await getStationAsync(parsed.station1);
 
       // Only use current_location if the departed station is on this line.
       if (!departedStation || !isStationOnLine(adjacencyCache, departedStation.code, lineCode)) {
         if (targetStationName) {
-          const stationAtPlatform = await getStationByName(targetStationName);
+          const stationAtPlatform = await getStationAsync(targetStationName);
           if (stationAtPlatform) {
             return { lat: stationAtPlatform.lat, lng: stationAtPlatform.lng, confidence: "estimated" };
           }
@@ -340,7 +347,7 @@ export async function calculatePosition(
       }
 
       const nextStationObj = targetStationName
-        ? await getStationByName(targetStationName)
+        ? await getStationAsync(targetStationName)
         : null;
 
       const neighbors = findConnectedStations(adjacencyCache, departedStation.code, lineCode);
@@ -383,8 +390,10 @@ export async function calculatePosition(
     case "between": {
       if (!parsed.station1 || !parsed.station2) return null;
 
-      const station1 = await getStationByName(parsed.station1);
-      const station2 = await getStationByName(parsed.station2);
+      const [station1, station2] = await Promise.all([
+        getStationAsync(parsed.station1),
+        getStationAsync(parsed.station2),
+      ]);
 
       // Only use current_location if both stations are on this line.
       if (
@@ -393,7 +402,7 @@ export async function calculatePosition(
         !isStationOnLine(adjacencyCache, station2.code, lineCode)
       ) {
         if (targetStationName) {
-          const stationAtPlatform = await getStationByName(targetStationName);
+          const stationAtPlatform = await getStationAsync(targetStationName);
           if (stationAtPlatform) {
             return { lat: stationAtPlatform.lat, lng: stationAtPlatform.lng, confidence: "estimated" };
           }
@@ -423,7 +432,7 @@ export async function calculatePosition(
 
     default:
       if (targetStationName) {
-        const station = await getStationByName(targetStationName);
+        const station = await getStationAsync(targetStationName);
         if (station) {
           return {
             lat: station.lat,
@@ -439,15 +448,14 @@ export async function calculatePosition(
 /**
  * Predict the next station a train will depart toward, based on its
  * current station and the direction of its final destination.
- * Uses straight-line distance as a heuristic to pick the correct neighbor.
+ * Pass stationCache to avoid per-call DB lookups (batch mode).
  */
 export async function predictNextStation(
   currentStationName: string,
   destinationName: string,
-  lineCode?: string
+  lineCode?: string,
+  stationCache?: Map<string, Station | null>
 ): Promise<{ lat: number; lng: number; travelTime: number } | null> {
-  // Skip prediction at terminal stations (train has reached its destination
-  // and will reverse — we can't reliably predict the new direction)
   const normCurrent = currentStationName.replace(/\./g, "").trim().toLowerCase();
   const normDest = destinationName.replace(/\./g, "").trim().toLowerCase();
   if (normCurrent === normDest) return null;
@@ -456,10 +464,14 @@ export async function predictNextStation(
     adjacencyCache = await getAdjacencies();
   }
 
-  const currentStation = await getStationByName(currentStationName);
+  const currentStation = stationCache
+    ? resolveStation(currentStationName, stationCache)
+    : await getStationByName(currentStationName);
   if (!currentStation) return null;
 
-  const destStation = await getStationByName(destinationName);
+  const destStation = stationCache
+    ? resolveStation(destinationName, stationCache)
+    : await getStationByName(destinationName);
   if (!destStation) return null;
 
   // Also skip if the resolved station codes match (handles naming variants)

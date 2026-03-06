@@ -133,6 +133,17 @@ export async function isStationOnLine(stationCode: string, lineCode: string): Pr
   return result.rows.length > 0;
 }
 
+/** Get all station codes on a line (one query, for batch validation). */
+export async function getStationCodesOnLine(lineCode: string): Promise<Set<string>> {
+  const result = await query(
+    `SELECT DISTINCT from_station_code as code FROM station_adjacency WHERE line_code = $1
+     UNION
+     SELECT DISTINCT to_station_code FROM station_adjacency WHERE line_code = $1`,
+    [lineCode]
+  );
+  return new Set(result.rows.map((r: { code: string }) => r.code));
+}
+
 export async function getAdjacencies(): Promise<Adjacency[]> {
   const result = await query(`
     SELECT 
