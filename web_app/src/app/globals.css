@@ -34,3 +34,8 @@ html, body {
 .mapboxgl-popup-tip {
   border-top-color: rgba(0, 0, 0, 0.9) !important;
 }
+
+/* Line filter swatches: keep background color visible (Tailwind/base can override inline styles) */
+.line-filter-swatch {
+  background-color: var(--line-color, #999) !important;
+}

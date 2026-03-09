@@ -1,9 +1,11 @@
 import { Pool as PgPool } from "pg";
 import { Pool as NeonPool } from "@neondatabase/serverless";
 
-const isProduction = !!process.env.DATABASE_URL;
+// Production (Vercel): Neon serverless driver + DATABASE_URL for serverless functions.
+// Local: pg pooling with POSTGRES_* so we never use Neon driver in Node (avoids deploymentId errors).
+const isVercel = !!process.env.VERCEL;
 
-const pool = isProduction
+const pool = isVercel && process.env.DATABASE_URL
   ? new NeonPool({ connectionString: process.env.DATABASE_URL })
   : new PgPool({
       host: process.env.POSTGRES_HOST || "localhost",
