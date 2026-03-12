@@ -58,7 +58,7 @@ export default function Home() {
             overflow: "hidden",
           }}
         >
-          <div style={{ padding: "1rem", height: "100%", overflowY: "auto" }}>
+          <div style={{ padding: "1rem", height: "100%", overflowY: "auto", display: "flex", flexDirection: "column" }}>
             {/* Header */}
             <div style={{ marginBottom: "1.5rem" }}>
               <h1 style={{ fontSize: "1.25rem", fontWeight: "bold", color: "white", display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -91,6 +91,37 @@ export default function Home() {
                   Last update: {new Date(latestTimestamp).toLocaleString()}
                 </div>
               )}
+            </div>
+
+            {/* Author Footer */}
+            <div style={{ marginTop: "auto", paddingTop: "1.5rem", borderTop: "1px solid rgba(55, 65, 81, 0.5)" }}>
+              <div style={{ fontSize: "0.7rem", color: "#6b7280", marginBottom: "0.5rem" }}>
+                Built by <span style={{ color: "#d1d5db", fontWeight: "500" }}>Zhi Yuan Chua</span>
+              </div>
+              <div style={{ display: "flex", gap: "0.75rem" }}>
+                <a
+                  href="https://github.com/chuazy94/kafka-tfl-status"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.7rem", color: "#9ca3af", textDecoration: "none" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#f8fafc")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#9ca3af")}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                  Source
+                </a>
+                <a
+                  href="https://chuazy94.github.io/zy_blog_2/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.7rem", color: "#9ca3af", textDecoration: "none" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#f8fafc")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#9ca3af")}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  Blog
+                </a>
+              </div>
             </div>
           </div>
         </div>
