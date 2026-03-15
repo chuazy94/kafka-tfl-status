@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLatestTrainPositions, getStationByName, getStationCodesOnLine, Station, type TrainPosition } from "@/lib/db";
+import { getLatestTrainPositions, getStationByName, getStationCodesOnLineCached, Station, type TrainPosition } from "@/lib/db";
 import { calculatePosition, getNextStationFromLocation, parseLocationText, parseTimeToStation, predictNextStation } from "@/lib/position-calculator";
 
 export const dynamic = "force-dynamic";
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
 
     const [stationResults, ...lineResults] = await Promise.all([
       Promise.all(allNames.map((name) => getStationByName(name))),
-      ...uniqueLineCodes.map((lc) => getStationCodesOnLine(lc!)),
+      ...uniqueLineCodes.map((lc) => getStationCodesOnLineCached(lc!)),
     ]);
 
     const stationCache = new Map<string, Station | null>();

@@ -176,7 +176,37 @@ const STATION_NAME_ALIASES: Record<string, string> = {
   "watford junction": "Watford",
 };
 
-export async function getStationByName(name: string): Promise<Station | null> {
+// In-memory station cache: loads all ~330 stations once, refreshes every hour.
+// Eliminates ~50-100 DB round trips per /api/trains call.
+let allStationsCache: Station[] | null = null;
+let stationsCacheTimestamp = 0;
+const STATIONS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+async function getAllStationsCached(): Promise<Station[]> {
+  const now = Date.now();
+  if (allStationsCache && now - stationsCacheTimestamp < STATIONS_CACHE_TTL) {
+    return allStationsCache;
+  }
+  allStationsCache = await getStations();
+  stationsCacheTimestamp = now;
+  return allStationsCache;
+}
+
+// In-memory cache for station codes per line (adjacency data is static)
+const stationCodesOnLineCache = new Map<string, { data: Set<string>; timestamp: number }>();
+
+export async function getStationCodesOnLineCached(lineCode: string): Promise<Set<string>> {
+  const now = Date.now();
+  const cached = stationCodesOnLineCache.get(lineCode);
+  if (cached && now - cached.timestamp < STATIONS_CACHE_TTL) {
+    return cached.data;
+  }
+  const data = await getStationCodesOnLine(lineCode);
+  stationCodesOnLineCache.set(lineCode, { data, timestamp: now });
+  return data;
+}
+
+function fuzzyMatchStation(name: string, stations: Station[]): Station | null {
   const cleanName = name
     .replace(/ Underground Station/gi, "")
     .replace(/ Station/gi, "")
@@ -187,38 +217,46 @@ export async function getStationByName(name: string): Promise<Station | null> {
 
   const alias = STATION_NAME_ALIASES[cleanName.toLowerCase()];
   const searchName = alias || cleanName;
+  const searchLower = searchName.toLowerCase();
 
-  const noApostrophe = searchName.replace(/['']/g, "");
-  const withoutParens = searchName.replace(/\s*\(.*?\)/g, "").trim();
+  const noApostrophe = searchName.replace(/['']/g, "").toLowerCase();
+  const withoutParens = searchName.replace(/\s*\(.*?\)/g, "").trim().toLowerCase();
   const andToAmp = withoutParens.replace(/ and /gi, " & ");
 
-  const result = await query(`
-    SELECT 
-      code,
-      name,
-      ST_Y(location::geometry) as lat,
-      ST_X(location::geometry) as lng,
-      lines
-    FROM stations
-    WHERE location IS NOT NULL
-      AND (
-        LOWER(REPLACE(name, '.', '')) = LOWER($1)
-        OR LOWER(REPLACE(name, '.', '')) LIKE LOWER($2)
-        OR LOWER(REGEXP_REPLACE(REPLACE(name, '.', ''), '''', '', 'g')) = LOWER($3)
-        OR LOWER(REPLACE(name, '.', '')) LIKE LOWER($4)
-        OR LOWER(REPLACE(name, '.', '')) = LOWER($5)
-        OR LOWER(REPLACE(REGEXP_REPLACE(name, '\\s*\\(.*?\\)', '', 'g'), '.', '')) = LOWER($6)
-      )
-    ORDER BY 
-      CASE
-        WHEN LOWER(REPLACE(name, '.', '')) = LOWER($1) THEN 0
-        WHEN LOWER(REPLACE(name, '.', '')) = LOWER($5) THEN 1
-        WHEN LOWER(REPLACE(name, '.', '')) LIKE LOWER($4) THEN 2
-        ELSE 3
-      END,
-      LENGTH(name)
-    LIMIT 1
-  `, [searchName, `%${searchName}%`, noApostrophe, `${searchName}%`, andToAmp, withoutParens]);
-  
-  return (result.rows[0] as Station) || null;
+  let bestMatch: Station | null = null;
+  let bestPriority = 99;
+
+  for (const station of stations) {
+    const dbName = station.name.replace(/\./g, "").toLowerCase();
+    const dbNoApostrophe = dbName.replace(/['']/g, "");
+    const dbNoParens = station.name.replace(/\s*\(.*?\)/g, "").replace(/\./g, "").trim().toLowerCase();
+
+    let priority = 99;
+
+    if (dbName === searchLower) {
+      priority = 0; // exact match
+    } else if (dbName === andToAmp) {
+      priority = 1; // "and" → "&" match
+    } else if (dbName.startsWith(searchLower)) {
+      priority = 2; // prefix match
+    } else if (dbNoApostrophe === noApostrophe) {
+      priority = 3; // apostrophe-insensitive match
+    } else if (dbNoParens === withoutParens) {
+      priority = 4; // parenthetical-insensitive match
+    } else if (dbName.includes(searchLower)) {
+      priority = 5; // contains match
+    }
+
+    if (priority < bestPriority || (priority === bestPriority && bestMatch && station.name.length < bestMatch.name.length)) {
+      bestPriority = priority;
+      bestMatch = station;
+    }
+  }
+
+  return bestMatch;
+}
+
+export async function getStationByName(name: string): Promise<Station | null> {
+  const stations = await getAllStationsCached();
+  return fuzzyMatchStation(name, stations);
 }

@@ -53,7 +53,7 @@ interface AnimatedTrain {
   properties: TrainFeature["properties"];
 }
 
-const FETCH_INTERVAL = 10000;          // ms between API polls
+const FETCH_INTERVAL = 30000;          // ms between API polls (TfL API updates every ~30s)
 const BLEND_DURATION = 1500;           // ms to blend display position after new data arrives
 const TRAIN_RETENTION_MS = 90000;      // keep stale trains for 90s before removing
 const OVERLAP_OFFSET = 0.00015;        // ~15m offset for overlapping trains
