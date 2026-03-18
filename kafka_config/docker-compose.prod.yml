@@ -23,6 +23,25 @@ services:
       retries: 10
     restart: unless-stopped
 
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: tfl-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tfl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tfl_password}
+      POSTGRES_DB: ${POSTGRES_DB:-tfl_trains}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: pg_isready -U tfl -d tfl_trains
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   kafka-producer:
     build:
       context: ../kafka_producer
@@ -46,29 +65,39 @@ services:
       - ../.env.prod
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_SSLMODE: disable
     volumes:
       - pyspark_checkpoints:/app/checkpoints
     depends_on:
       kafka:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
   db-cleanup:
     image: postgres:16-alpine
     container_name: db-cleanup
-    env_file:
-      - ../.env.prod
     environment:
-      PGSSLMODE: require
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-tfl}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-tfl_password}
+      PGDATABASE: ${POSTGRES_DB:-tfl_trains}
     entrypoint: /bin/sh
     command: >
       -c "while true; do
-        sleep 600;
+        sleep 3600;
         echo \"[$$(date)] Running cleanup...\";
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"SELECT cleanup_old_train_positions(INTERVAL '2 hours');\";
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"VACUUM train_positions;\";
+        psql -c \"SELECT cleanup_old_train_positions(INTERVAL '1 day');\";
+        psql -c \"VACUUM train_positions;\";
       done"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
+  postgres_data:
   pyspark_checkpoints:
