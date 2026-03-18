@@ -1,13 +1,16 @@
-import { Pool as PgPool } from "pg";
-import { Pool as NeonPool } from "@neondatabase/serverless";
+import { Pool } from "pg";
 
-// Production (Vercel): Neon serverless driver + DATABASE_URL for serverless functions.
-// Local: pg pooling with POSTGRES_* so we never use Neon driver in Node (avoids deploymentId errors).
-const isVercel = !!process.env.VERCEL;
-
-const pool = isVercel && process.env.DATABASE_URL
-  ? new NeonPool({ connectionString: process.env.DATABASE_URL })
-  : new PgPool({
+// Connects via DATABASE_URL (single connection string) or individual POSTGRES_* env vars.
+// Works the same in all environments: local dev, Vercel, Oracle VM.
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+      ssl: process.env.DATABASE_SSLMODE === "disable" ? false : { rejectUnauthorized: false },
+    })
+  : new Pool({
       host: process.env.POSTGRES_HOST || "localhost",
       port: parseInt(process.env.POSTGRES_PORT || "5435"),
       database: process.env.POSTGRES_DB || "tfl_trains",
@@ -15,7 +18,7 @@ const pool = isVercel && process.env.DATABASE_URL
       password: process.env.POSTGRES_PASSWORD || "tfl_password",
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 5000,
     });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
