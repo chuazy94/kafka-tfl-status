@@ -84,12 +84,10 @@ services:
       - ../.env.prod
     environment:
       PGHOST: postgres
-      PGUSER: ${POSTGRES_USER:-tfl}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-tfl_password}
-      PGDATABASE: ${POSTGRES_DB:-tfl_trains}
     entrypoint: /bin/sh
     command: >
-      -c "while true; do
+      -c "export PGUSER=$$POSTGRES_USER PGPASSWORD=$$POSTGRES_PASSWORD PGDATABASE=$$POSTGRES_DB;
+      while true; do
         sleep 3600;
         echo \"[$$(date)] Running cleanup...\";
         if pg_isready -q; then
