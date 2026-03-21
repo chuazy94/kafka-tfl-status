@@ -5,6 +5,12 @@ import { calculatePosition, getNextStationFromLocation, parseLocationText, parse
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// Cache the fully-processed GeoJSON response per line filter.
+// The expensive work (DB view query + fuzzy station matching + position calculation)
+// only needs to run once per data refresh cycle (~30s from the producer).
+const responseCache = new Map<string, { json: object; timestamp: number }>();
+const RESPONSE_CACHE_TTL = 10_000; // 10 seconds
+
 /** Collect all station names needed for filtering (from current_location parsing). */
 function getStationNamesForFilter(trains: TrainPosition[]): Set<string> {
   const names = new Set<string>();
@@ -82,6 +88,15 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const lineCode = searchParams.get("line") || undefined;
+    const cacheKey = lineCode ?? "__all__";
+
+    // Return cached response if still fresh — avoids re-running all the
+    // station fuzzy matching and position calculation on rapid polls.
+    const now = Date.now();
+    const cached = responseCache.get(cacheKey);
+    if (cached && now - cached.timestamp < RESPONSE_CACHE_TTL) {
+      return NextResponse.json(cached.json);
+    }
 
     const trains = await getLatestTrainPositions(lineCode);
 
@@ -253,6 +268,7 @@ export async function GET(request: NextRequest) {
       }),
     };
 
+    responseCache.set(cacheKey, { json: geojson, timestamp: Date.now() });
     return NextResponse.json(geojson);
   } catch (error) {
     console.error("Error fetching trains:", error);

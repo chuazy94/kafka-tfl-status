@@ -94,37 +94,57 @@ export async function getLines(): Promise<Line[]> {
   return result.rows as Line[];
 }
 
+// In-memory cache for train positions to avoid re-running the expensive view query.
+// The view does MAX(timestamp) + DISTINCT ON across the whole table on every call.
+// Data only updates every ~30s from the producer, so a 10s cache is safe.
+const trainPositionsCache = new Map<string, { data: TrainPosition[]; timestamp: number }>();
+const TRAIN_CACHE_TTL = 10_000; // 10 seconds
+
 export async function getLatestTrainPositions(lineCode?: string): Promise<TrainPosition[]> {
-  let sql = `
-    SELECT 
-      id,
-      set_number,
-      trip_number,
-      line_code,
-      station_code,
-      station_name,
-      platform_name,
-      current_location,
-      time_to_station,
-      destination,
-      calculated_lat,
-      calculated_lng,
-      heading,
-      timestamp
-    FROM latest_train_positions
-  `;
-  
-  const params: string[] = [];
-  
-  if (lineCode) {
-    sql += ` WHERE line_code = $1`;
-    params.push(lineCode);
+  const cacheKey = lineCode ?? "__all__";
+  const now = Date.now();
+  const cached = trainPositionsCache.get(cacheKey);
+  if (cached && now - cached.timestamp < TRAIN_CACHE_TTL) {
+    return cached.data;
   }
-  
-  sql += ` ORDER BY line_code, set_number`;
-  
+
+  // Inline the view logic with line_code pushed into the CTE so PostgreSQL
+  // can use idx_train_positions_line to prune rows early, rather than
+  // materializing the full view and filtering afterwards.
+  const params: string[] = [];
+  const lineFilter = lineCode ? `AND tp.line_code = $1` : "";
+  if (lineCode) params.push(lineCode);
+
+  const sql = `
+    WITH latest_batch AS (
+      SELECT MAX(timestamp) as batch_ts FROM train_positions
+    ),
+    batch_records AS (
+      SELECT tp.*
+      FROM train_positions tp, latest_batch lb
+      WHERE tp.timestamp >= lb.batch_ts - INTERVAL '2 minutes'
+      ${lineFilter}
+    )
+    SELECT DISTINCT ON (set_number, line_code)
+      id, set_number, trip_number, line_code, station_code, station_name,
+      platform_name, current_location, time_to_station, destination,
+      calculated_lat, calculated_lng, heading, timestamp
+    FROM batch_records
+    ORDER BY
+      set_number, line_code, timestamp DESC,
+      CASE
+        WHEN time_to_station = '-' THEN 0
+        WHEN LOWER(time_to_station) = 'due' THEN 1
+        WHEN time_to_station ~ '^\\d+:\\d+$' THEN
+          2 + (SPLIT_PART(time_to_station, ':', 1)::INT * 60) + SPLIT_PART(time_to_station, ':', 2)::INT
+        ELSE 999999
+      END ASC
+  `;
+
   const result = await query(sql, params);
-  return result.rows as TrainPosition[];
+  const data = result.rows as TrainPosition[];
+  trainPositionsCache.set(cacheKey, { data, timestamp: now });
+  return data;
 }
 
 /** Check if a station exists on a given line (has at least one adjacency). */

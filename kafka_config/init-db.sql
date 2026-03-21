@@ -64,6 +64,9 @@ CREATE INDEX IF NOT EXISTS idx_adjacency_to ON station_adjacency(to_station_code
 CREATE INDEX IF NOT EXISTS idx_train_positions_timestamp ON train_positions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_train_positions_set ON train_positions(set_number);
 CREATE INDEX IF NOT EXISTS idx_train_positions_line ON train_positions(line_code);
+-- Composite index for the latest_train_positions view: covers the batch window lookup
+-- and the DISTINCT ON ordering in a single index scan.
+CREATE INDEX IF NOT EXISTS idx_train_positions_line_set_ts ON train_positions(line_code, set_number, timestamp DESC);
 
 -- Insert tube line reference data
 INSERT INTO lines (code, name, color) VALUES

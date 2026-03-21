@@ -90,8 +90,13 @@ services:
       -c "while true; do
         sleep 3600;
         echo \"[$$(date)] Running cleanup...\";
-        psql -c \"SELECT cleanup_old_train_positions(INTERVAL '1 day');\";
-        psql -c \"VACUUM train_positions;\";
+        if pg_isready -q; then
+          psql -c \"SELECT cleanup_old_train_positions(INTERVAL '1 day');\";
+          psql -c \"VACUUM train_positions;\";
+          echo \"[$$(date)] Cleanup complete\";
+        else
+          echo \"[$$(date)] postgres not reachable, skipping cleanup\";
+        fi;
       done"
     depends_on:
       postgres:
