@@ -98,7 +98,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(cached.json);
     }
 
+    const t0 = Date.now();
     const trains = await getLatestTrainPositions(lineCode);
+    const t1 = Date.now();
 
     // Batch-fetch all stations needed (filter + positions + predictions) in parallel
     const filterNames = getStationNamesForFilter(trains);
@@ -110,6 +112,7 @@ export async function GET(request: NextRequest) {
       Promise.all(allNames.map((name) => getStationByName(name))),
       ...uniqueLineCodes.map((lc) => getStationCodesOnLineCached(lc!)),
     ]);
+    const t2 = Date.now();
 
     const stationCache = new Map<string, Station | null>();
     allNames.forEach((name, i) => {
@@ -209,9 +212,16 @@ export async function GET(request: NextRequest) {
       })
     );
 
+    const t3 = Date.now();
+
     // Filter out trains without positions (but log the count)
     const validTrains = trainsWithPositions.filter(
       (train) => train.lat !== null && train.lng !== null
+    );
+
+    console.log(
+      `[/api/trains] line=${lineCode ?? "ALL"} trains=${trains.length} stations=${allNames.length} | ` +
+      `db=${t1 - t0}ms lookup=${t2 - t1}ms positions=${t3 - t2}ms total=${t3 - t0}ms`
     );
 
     // Log statistics periodically

@@ -88,10 +88,10 @@ services:
     command: >
       -c "export PGUSER=$$POSTGRES_USER PGPASSWORD=$$POSTGRES_PASSWORD PGDATABASE=$$POSTGRES_DB;
       while true; do
-        sleep 3600;
+        sleep 600;
         echo \"[$$(date)] Running cleanup...\";
         if pg_isready -q; then
-          psql -c \"SELECT cleanup_old_train_positions(INTERVAL '1 day');\";
+          psql -c \"SELECT cleanup_old_train_positions(INTERVAL '2 hours');\";
           psql -c \"VACUUM train_positions;\";
           echo \"[$$(date)] Cleanup complete\";
         else
